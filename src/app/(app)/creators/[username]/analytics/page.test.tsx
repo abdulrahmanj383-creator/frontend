@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { CreatorAnalytics } from '@/types';
 
@@ -39,8 +39,12 @@ vi.mock('@/hooks/use-creator-analytics', () => ({
 }));
 
 const downloadAnalyticsCsvMock = vi.fn();
+const downloadAnalyticsExcelMock = vi.fn();
+const printAnalyticsPdfMock = vi.fn();
 vi.mock('@/lib/csv-export', () => ({
   downloadAnalyticsCsv: (...args: unknown[]) => downloadAnalyticsCsvMock(...args),
+  downloadAnalyticsExcel: (...args: unknown[]) => downloadAnalyticsExcelMock(...args),
+  printAnalyticsPdf: (...args: unknown[]) => printAnalyticsPdfMock(...args),
 }));
 
 import CreatorAnalyticsPage from './page';
@@ -52,7 +56,7 @@ function mockAuthenticatedAs(username: string): void {
 }
 
 describe('CreatorAnalyticsPage', () => {
-  beforeEach(() => {
+  beforeEach((): void => {
     vi.clearAllMocks();
     mockAuthenticatedAs('alice');
     useCreatorAnalyticsMock.mockReturnValue({
@@ -63,7 +67,7 @@ describe('CreatorAnalyticsPage', () => {
     });
   });
 
-  it("denies access when viewing another creator's analytics", () => {
+  it("denies access when viewing another creator's analytics", (): void => {
     mockAuthenticatedAs('someone-else');
 
     render(<CreatorAnalyticsPage />);
@@ -71,13 +75,13 @@ describe('CreatorAnalyticsPage', () => {
     expect(screen.getByText('Access Denied')).toBeInTheDocument();
   });
 
-  it('renders the page for the creator viewing their own analytics', () => {
+  it('renders the page for the creator viewing their own analytics', (): void => {
     render(<CreatorAnalyticsPage />);
 
     expect(screen.getByText('Creator Analytics')).toBeInTheDocument();
   });
 
-  it('shows summary cards with correct values from the fetched data', () => {
+  it('shows summary cards with correct values from the fetched data', (): void => {
     render(<CreatorAnalyticsPage />);
 
     expect(screen.getByTestId('summary-total-earnings')).toHaveTextContent('$500.00');
@@ -85,16 +89,16 @@ describe('CreatorAnalyticsPage', () => {
     expect(screen.getByTestId('summary-earnings-week')).toHaveTextContent('$50.00');
   });
 
-  it('renders the earnings trend chart, source breakdown, and top tippers table', () => {
+  it('renders the earnings trend chart, source breakdown, and top tippers table', (): void => {
     render(<CreatorAnalyticsPage />);
 
-    expect(screen.getByTestId('earnings-trend-chart')).toBeInTheDocument();
-    expect(screen.getByTestId('tip-source-breakdown-chart')).toBeInTheDocument();
+    expect(screen.getByText('Earnings Trend')).toBeInTheDocument();
+    expect(screen.getByText('Tip Source Breakdown')).toBeInTheDocument();
     expect(screen.getByTestId('top-tippers-table')).toBeInTheDocument();
     expect(screen.getByText('Bob')).toBeInTheDocument();
   });
 
-  it('shows a loading state while analytics are being fetched', () => {
+  it('shows a loading state while analytics are being fetched', (): void => {
     useCreatorAnalyticsMock.mockReturnValue({
       data: undefined,
       isLoading: true,
@@ -107,7 +111,7 @@ describe('CreatorAnalyticsPage', () => {
     expect(screen.getByText(/loading analytics/i)).toBeInTheDocument();
   });
 
-  it('shows an error state when the fetch fails', () => {
+  it('shows an error state when the fetch fails', (): void => {
     useCreatorAnalyticsMock.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -120,22 +124,27 @@ describe('CreatorAnalyticsPage', () => {
     expect(screen.getByText(/failed to load analytics/i)).toBeInTheDocument();
   });
 
-  it('refetches with the updated range when a date range preset is selected', async () => {
+  it('refetches with the updated range when a date range preset is selected', async (): Promise<void> => {
     const user = userEvent.setup();
     render(<CreatorAnalyticsPage />);
 
-    expect(useCreatorAnalyticsMock).toHaveBeenCalledWith('alice', '30d');
+    expect(useCreatorAnalyticsMock).toHaveBeenCalledWith(
+      'alice',
+      expect.objectContaining({ preset: '30d' })
+    );
 
     await user.click(screen.getByRole('button', { name: '90 Days' }));
 
-    expect(useCreatorAnalyticsMock).toHaveBeenCalledWith('alice', '90d');
+    expect(useCreatorAnalyticsMock).toHaveBeenCalledWith(
+      'alice',
+      expect.objectContaining({ preset: '90d' })
+    );
   });
 
-  it('exports a CSV with the currently loaded data and range when Export CSV is clicked', async () => {
-    const user = userEvent.setup();
+  it('exports a CSV with the currently loaded data and range when Export CSV is clicked', async (): Promise<void> => {
     render(<CreatorAnalyticsPage />);
 
-    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
 
     expect(downloadAnalyticsCsvMock).toHaveBeenCalledWith(
       sampleAnalytics,
@@ -143,7 +152,20 @@ describe('CreatorAnalyticsPage', () => {
     );
   });
 
-  it('disables the Export CSV button while data is loading', () => {
+  it('exports Excel and PDF reports with the currently loaded analytics data', async (): Promise<void> => {
+    render(<CreatorAnalyticsPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export Excel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Export PDF' }));
+
+    expect(downloadAnalyticsExcelMock).toHaveBeenCalledWith(
+      sampleAnalytics,
+      'dorisio-analytics-alice-30d.xls'
+    );
+    expect(printAnalyticsPdfMock).toHaveBeenCalledWith(sampleAnalytics, 'alice Creator Analytics');
+  });
+
+  it('disables the Export CSV button while data is loading', (): void => {
     useCreatorAnalyticsMock.mockReturnValue({
       data: undefined,
       isLoading: true,
@@ -154,5 +176,7 @@ describe('CreatorAnalyticsPage', () => {
     render(<CreatorAnalyticsPage />);
 
     expect(screen.getByRole('button', { name: 'Export CSV' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Export Excel' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Export PDF' })).toBeDisabled();
   });
 });

@@ -8,6 +8,9 @@ export type { LoadingSpinnerProps } from './loading-spinner';
 export { ErrorMessage } from './error-message';
 export type { ErrorMessageProps } from './error-message';
 
+export { InlineFormError } from './inline-form-error';
+export type { InlineFormErrorProps } from './inline-form-error';
+
 export { Avatar } from './avatar';
 export type { AvatarProps } from './avatar';
 
@@ -21,3 +24,7 @@ export {
   CreatorVerificationBadge,
   type CreatorVerificationBadgeProps,
 } from './creator-verification-badge';
+
+export { SupporterBadge, type SupporterBadgeProps } from './supporter-badge';
+
+export { PWAInstallPrompt } from './pwa-install-prompt';
