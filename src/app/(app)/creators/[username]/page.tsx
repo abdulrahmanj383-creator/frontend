@@ -21,10 +21,23 @@ import {
   TransactionTableSkeleton,
 } from '@/components/shared/creator-skeletons';
 import { CreatorVerificationBadge } from '@/components/shared/creator-verification-badge';
+import { CreatorTierBadge } from '@/components/shared/creator-tier-badge';
 import { CreatorBio } from '@/components/sections/creator-bio';
+import { resolveCreatorTier } from '@/lib/creator-tiers';
+import { FollowButton } from '@/components/sections/follow-button';
 import { SubscriptionTiers } from '@/components/sections/subscription-tiers';
 import { SubscriberOnlyContent } from '@/components/sections/subscriber-only-content';
+import { ExclusiveContentFeed } from '@/components/sections/exclusive-content-feed';
+import { AnnouncementFeed } from '@/components/sections/announcement-feed';
+import { SupporterCommissionRequest } from '@/components/sections/supporter-commission-request';
+import { SupporterLeaderboard } from '@/components/sections/supporter-leaderboard';
+import { SupporterLoyaltyCard } from '@/components/sections/supporter-loyalty-card';
+import { CreatorLiveStreamSection } from '@/components/sections/creator-live-stream';
+import { CommissionRequests } from '@/components/sections/commission-requests';
+import { useCreatorSupporters } from '@/hooks/use-creator-supporters';
+import { useCreatorBadgeThresholds } from '@/hooks/use-badge-thresholds';
 import { useAuthStore } from '@/stores/auth-store';
+import { getPublicCollaborations } from '@/lib/collaborations';
 
 interface CreatorPageState {
   creator: Creator | null;
@@ -46,6 +59,19 @@ export default function CreatorProfilePage(): JSX.Element {
 
   const balance = useCreatorBalance(state.creator?.id);
   const history = useTransactionHistory(state.creator?.id);
+  const { entries: topSupporters } = useCreatorSupporters(username);
+  const { thresholds } = useCreatorBadgeThresholds(state.creator?.id);
+
+  // The signed-in supporter's cumulative spend with this creator, derived from
+  // their confirmed tips in the loaded history. Best-effort: the SDK exposes no
+  // per-supporter total, so this covers the most recent page of tips.
+  const supporterSpend = user
+    ? history.transactions
+        .filter((tx) => tx.senderId === user.id && tx.status === 'confirmed')
+        .reduce((sum, tx) => sum + tx.amount, 0)
+    : 0;
+  const creatorTier = resolveCreatorTier(state.creator?.totalEarnings ?? 0);
+  const collaborations = state.creator ? getPublicCollaborations(state.creator.id) : [];
 
   // Fetch creator profile
   useEffect(() => {
@@ -139,11 +165,21 @@ export default function CreatorProfilePage(): JSX.Element {
                   verificationReason={state.creator.verificationReason}
                   showDetails
                 />
+                <CreatorTierBadge tier={creatorTier} size="md" />
               </div>
 
-              <p className="text-muted-foreground mb-4">@{state.creator.username}</p>
+              <p className="text-muted-foreground mb-4">
+                @{state.creator.username}
+              </p>
 
-              {state.creator.bio && <CreatorBio value={state.creator.bio} className="mb-6 max-w-2xl text-lg" />}
+              <p className="text-sm text-muted-foreground mb-6">
+                Creator tier:{' '}
+                {creatorTier.charAt(0).toUpperCase() + creatorTier.slice(1)}
+              </p>
+
+              {state.creator.bio && (
+                <CreatorBio value={state.creator.bio} className="mb-6 max-w-2xl text-lg" />
+              )}
 
               <div className="flex gap-8 mb-6">
                 <div>
@@ -160,22 +196,122 @@ export default function CreatorProfilePage(): JSX.Element {
                 </div>
               </div>
 
+              <FollowButton creatorId={state.creator.id} followerId={user?.id} className="mb-4" />
+
               {/* Tip Button */}
-              <DorisioButton creatorId={state.creator.id} />
+              <DorisioButton
+                creatorId={state.creator.id}
+                creatorName={state.creator.displayName}
+                tipTiers={state.creator.tipTiers}
+              />
               <SubscriptionTiers creatorId={state.creator.id} subscriberId={user?.id} />
             </div>
           </div>
         </div>
       </div>
 
+      {state.creator.liveStream && <CreatorLiveStreamSection stream={state.creator.liveStream} />}
+
       {/* Content Section */}
       <div className="max-w-4xl mx-auto px-4 py-12">
         <SubscriberOnlyContent creatorId={state.creator.id} subscriberId={user?.id}>
           <div className="rounded-lg border bg-card p-6">
             <h2 className="font-semibold">Welcome, member</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Thanks for supporting this creator.</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Thanks for supporting this creator.
+            </p>
           </div>
         </SubscriberOnlyContent>
+
+        {user && (
+          <section className="mb-12">
+            <CommissionRequests
+              creatorId={state.creator.username}
+              creatorUserId={state.creator.userId}
+              creatorUsername={state.creator.username}
+              creatorName={state.creator.displayName || state.creator.username}
+              viewerId={user.id}
+              viewerUserId={user.id}
+              viewerUsername={user.username || user.id}
+              viewerName={user.name || user.username || 'You'}
+              role="supporter"
+            />
+          </section>
+        )}
+
+        {collaborations.length > 0 && (
+          <section className="mb-12" aria-labelledby="creator-collaborations-heading">
+            <h2 id="creator-collaborations-heading" className="mb-4 text-xl font-bold">
+              Guest appearances
+            </h2>
+            <ul className="divide-y border-y">
+              {collaborations.map((collaboration) => {
+                const isInviter = collaboration.inviterId === state.creator!.id;
+                const partnerUsername = isInviter
+                  ? collaboration.inviteeUsername
+                  : collaboration.inviterUsername;
+                const partnerName = isInviter
+                  ? collaboration.inviteeName
+                  : collaboration.inviterName;
+                const share = isInviter ? collaboration.inviterShare : collaboration.inviteeShare;
+
+                return (
+                  <li
+                    key={collaboration.id}
+                    className="flex flex-wrap items-center justify-between gap-2 py-4"
+                  >
+                    <Link
+                      href={`/creators/${partnerUsername}`}
+                      className="font-medium hover:underline"
+                    >
+                      {partnerName}{' '}
+                      <span className="text-sm text-muted-foreground">@{partnerUsername}</span>
+                    </Link>
+                    <span className="text-sm text-muted-foreground">
+                      Agreed share: {share}% · Started{' '}
+                      {formatDate(collaboration.acceptedAt || collaboration.createdAt)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+        {/* Creator Exclusive Tier-Locked Content */}
+        <ExclusiveContentFeed
+          creatorId={state.creator.id}
+          creatorName={state.creator.displayName || state.creator.username}
+          currentUserId={user?.id}
+        />
+
+        {/* Supporters can request custom content (commissions) from this creator */}
+        <div className="mt-12">
+          <SupporterCommissionRequest creator={state.creator} />
+        </div>
+
+        {/* Creator announcements / bulletin board for followers */}
+        <div className="mt-12">
+          <AnnouncementFeed
+            creatorId={state.creator.id}
+            creatorName={state.creator.displayName || state.creator.username}
+          />
+        </div>
+
+        {/* Supporter loyalty: earned badge, progress to next tier, opt-in */}
+        {user && (
+          <SupporterLoyaltyCard
+            creatorId={state.creator.id}
+            supporterId={user.id}
+            totalSpend={supporterSpend}
+          />
+        )}
+
+        {/* Top supporter leaderboard */}
+        {topSupporters.length > 0 && (
+          <div className="mt-12">
+            <SupporterLeaderboard entries={topSupporters} thresholds={thresholds} />
+          </div>
+        )}
         {/* Earnings Overview */}
         {balance.balance && (
           <section className="mb-12">
@@ -207,15 +343,15 @@ export default function CreatorProfilePage(): JSX.Element {
         {history.transactions.length > 0 && (
           <section>
             <h2 className="text-xl font-bold mb-6">Recent Tips</h2>
-            <div className="border rounded-lg overflow-hidden">
+            <div className="border rounded-lg max-h-96 overflow-auto">
               <table className="w-full">
                 <thead className="bg-muted border-b">
                   <tr>
-                    <th className="text-left px-6 py-3 font-semibold">From</th>
-                    <th className="text-left px-6 py-3 font-semibold">Amount</th>
-                    <th className="text-left px-6 py-3 font-semibold">Message</th>
-                    <th className="text-left px-6 py-3 font-semibold">Date</th>
-                    <th className="text-left px-6 py-3 font-semibold">Status</th>
+                    <th className="text-left px-6 py-3 font-semibold sticky top-0 z-10 bg-muted">From</th>
+                    <th className="text-left px-6 py-3 font-semibold sticky top-0 z-10 bg-muted">Amount</th>
+                    <th className="text-left px-6 py-3 font-semibold sticky top-0 z-10 bg-muted">Message</th>
+                    <th className="text-left px-6 py-3 font-semibold sticky top-0 z-10 bg-muted">Date</th>
+                    <th className="text-left px-6 py-3 font-semibold sticky top-0 z-10 bg-muted">Status</th>
                   </tr>
                 </thead>
                 <tbody>

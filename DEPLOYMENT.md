@@ -28,8 +28,31 @@ The following environment variables must be configured in Vercel:
 |----------|-------------|---------|
 | `NEXT_PUBLIC_ENABLE_ANALYTICS` | Enable analytics tracking | `false` |
 | `NEXT_PUBLIC_ENABLE_ERROR_REPORTING` | Enable error reporting | `false` |
+| `NEXT_PUBLIC_SENTRY_DSN` | Sentry DSN for browser error monitoring (unset disables reporting) | — |
+| `SENTRY_DSN` | Sentry DSN for server/edge error monitoring | — |
+| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | Environment label attached to Sentry events | `NODE_ENV` |
+| `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` | Share of transactions traced | `0.1` |
+| `SENTRY_ORG` / `SENTRY_PROJECT` | Sentry org/project for source map upload | — |
+| `SENTRY_AUTH_TOKEN` | Build token for source map upload (CI only) | — |
 
 ## Deployment Steps
+
+## Pre-deployment checklist
+
+Complete this checklist for every production release:
+
+- [ ] The release branch is green in CI and the production commit is identified.
+- [ ] `npm ci` and `npm run build` succeed with the Node.js version used by Vercel.
+- [ ] `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_STELLAR_NETWORK`, and
+      `NEXT_PUBLIC_STELLAR_HORIZON_URL` point at production services.
+- [ ] The backend release and any database migrations are compatible with this
+      frontend version.
+- [ ] Sentry and Vercel alerting are enabled, and the on-call contact is known.
+- [ ] A rollback deployment has been identified and its API compatibility checked.
+- [ ] No `.env*` file, token, private key, or secret is included in the commit.
+
+Do not use preview environment variables for production. Record the Vercel
+deployment ID, commit SHA, and release owner in the release or incident log.
 
 ### 1. Connect to Vercel
 
@@ -70,6 +93,17 @@ git push origin main
 4. Test creator dashboard: `/creators/[username]/dashboard` (requires login)
 5. Verify API connectivity in browser console
 
+Run a smoke test from a clean browser session before announcing the release:
+
+```bash
+curl --fail --silent --show-error "$NEXT_PUBLIC_API_URL/health"
+npm run build
+```
+
+Then exercise sign-in, wallet connection, a read-only creator profile, and the
+transaction flow. Confirm that requests use the expected API host and Stellar
+network; a successful page load alone does not prove the configuration is right.
+
 ## Monitoring
 
 ### Health Checks
@@ -79,6 +113,26 @@ Monitor deployment health via:
 - **Performance**: Vercel Analytics tab
 - **Errors**: Vercel Logs tab
 - **Frontend Logs**: Browser DevTools Console
+
+### Frontend Error Monitoring
+
+Sentry is wired up through `sentry.client.config.ts`, `sentry.server.config.ts`,
+and `sentry.edge.config.ts`, and `next.config.js` is wrapped with
+`withSentryConfig`. Monitoring is a no-op when no DSN is set, so local and
+preview environments do not need any Sentry configuration.
+
+To enable it in production:
+
+1. Create a Sentry project and copy its **DSN**.
+2. Set `NEXT_PUBLIC_SENTRY_DSN` (browser) and `SENTRY_DSN` (server/edge).
+3. To upload source maps during the build, also set `SENTRY_ORG`,
+   `SENTRY_PROJECT`, and `SENTRY_AUTH_TOKEN`. Without `SENTRY_AUTH_TOKEN` the
+   upload step is skipped so builds still succeed.
+
+Uncaught exceptions, React errors caught by the app's `ErrorBoundary`, the
+signed-in user context, and navigation breadcrumbs are all reported
+automatically. Configure alert rules in the Sentry project for critical
+error volume.
 
 ### Common Issues
 
@@ -108,6 +162,25 @@ vercel list
 # Rollback to specific deployment
 vercel rollback [deployment-id]
 ```
+
+If the release is already serving traffic, pause announcements and:
+
+1. Roll back to the last known-good Vercel deployment.
+2. Confirm that its frontend variables still match the backend version it calls.
+3. Repeat the smoke tests above, then watch Vercel and Sentry for one normal
+   traffic interval.
+4. Record both deployment IDs, commit SHAs, user impact, and the follow-up owner.
+
+### Emergency procedures
+
+- **API outage:** verify the backend health endpoint and Vercel logs. Avoid
+  repeated client retries that could amplify load.
+- **Bad frontend release:** use `vercel list` to identify the last known-good
+  deployment and run `vercel rollback <deployment-id>`.
+- **Leaked credential:** revoke it immediately, replace it in Vercel and CI,
+  redeploy, and document the rotation. Never place it in logs or issues.
+- **Error spike or wallet failures:** capture the deployment ID, affected route,
+  browser error, network, and time window in Sentry before changing code.
 
 ## Local Development
 
